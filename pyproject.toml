@@ -1,0 +1,20 @@
+[project]
+name = "extract-results-usac"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "click>=8.1.8",
+    "polars>=1.24.0",
+    "pydantic>=2.10.6",
+    "python-dateutil>=2.9.0.post0",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+]
+
+[dependency-groups]
+dev = [
+    "python-dotenv>=1.0.1",
+]
