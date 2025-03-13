@@ -1,5 +1,5 @@
 from pydantic import BaseModel, validator, HttpUrl, Extra, Field
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 from datetime import date, datetime
 
 class AthleteResult(BaseModel):
@@ -35,9 +35,42 @@ class AthleteResult(BaseModel):
             return datetime.strptime(value, "%m/%d/%Y").date()
         
         raise ValueError(f"Unsupported type for event_date: {type(value)}")
-    
-class RaceResult(BaseModel): 
-    foo: str
+
+class AthleteResultHeat(BaseModel):
+    place: int
+    name: str
+    category: Optional[str]
+    usac_number: Optional[int]
+    bib: Optional[str]
+    team: Optional[str]
+
+class Heat(BaseModel):
+    """
+    A 'heat' or sub-event, e.g. "RR Men CAT 1/2/3" with an ID like "1525491".
+    Contains a list of participant rows.
+    """
+    heat_id: str
+    heat_name: str
+    participants: List[AthleteResultHeat] = []
+
+class RaceEvent(BaseModel): 
+    """
+    The event/race container.
+    """
+    event_name: str
+    id: str
+    event_date: date
+    race_label: Optional[str] = None
+    heats: List[Heat] = []    
+
+class RaceSeries(BaseModel): 
+    """
+    The top-level container for multiple RaceEvents, each of which may have
+    multiple heats. Has a series name and a permit ID.
+    """
+    series_name: str
+    permit_id: str
+    events: List[RaceEvent] = []    
 
 class AthleteResultDetailed(AthleteResult): 
     bar: str

@@ -1,4 +1,6 @@
-import requests
+from itertools import groupby
+from operator import attrgetter
+from typing import Dict, List
 from bs4 import BeautifulSoup
 import polars as pd
 import csv
@@ -9,9 +11,21 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from src.filters import filter_athlete_results
+from src.models import AthleteResult
+from collections import defaultdict
 
-from .scraper import scrape_athlete_result_page
+from .scraper import scrape_athlete_result_page, scrape_event_series_page
 
+def group_by_event_url(results: list[AthleteResult]) -> dict[str, list[AthleteResult]]:
+    """
+    Groups a list of AthleteResult objects by their event_url.
+    Returns a dictionary where each key is a distinct event_url,
+    and the value is a list of AthleteResult objects for that URL.
+    """
+    grouped = defaultdict(list)
+    for r in results:
+        grouped[r.event_url].append(r)
+    return dict(grouped)
 
 def lookback_callback(_, __, value):
     """
@@ -92,6 +106,10 @@ def main(athlete_name, category, lookback, discipline):
     
     athlete_results = scrape_athlete_result_page(athlete_name)
     athlete_results_filtered = filter_athlete_results(athlete_results, lookback, discipline)
+    groups = group_by_event_url(athlete_results_filtered)
+    for url, group in groups.items():
+        results_page = scrape_event_series_page(url, group)
+        print(results_page)
 
     breakpoint()
 
