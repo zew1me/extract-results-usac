@@ -7,6 +7,8 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.13.3",
     "click>=8.1.8",
+    "dependency-injector>=4.46.0",
+    "fastapi>=0.115.11",
     "polars>=1.24.0",
     "pydantic>=2.10.6",
     "python-dateutil>=2.9.0.post0",
