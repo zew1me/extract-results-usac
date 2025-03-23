@@ -96,17 +96,41 @@ class WebScraper(ScraperInterface):
 
     def extract_race_date(self, soup: BeautifulSoup) -> date:
         bold_tag = soup.find("b")
-        if not bold_tag:
-            raise RuntimeError("No <b> tag found.")
-        match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", bold_tag.get_text())
-        if not match:
-            raise RuntimeError("No valid date found in <b> tag.")
-        return datetime.strptime(match.group(1), "%m/%d/%Y").date()
+        if bold_tag:           
+            match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", bold_tag.get_text())
+            if match: 
+                return datetime.strptime(match.group(1), "%m/%d/%Y").date()
 
-    def parse_load_info_id(self, onclick_str: str):
+        h3_tag = soup.find("h3")
+        if h3_tag:
+            brs = h3_tag.find_all("br")
+                # Prepare a regex pattern that matches both abbreviated and full month names.
+                # It looks for one or more letters for the month, then whitespace, one or two digits, a comma, whitespace, and four digits.
+            date_pattern = re.compile(r"([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})")
+            for br in brs:
+                next_text = br.next_sibling
+                if next_text:
+                    candidate = next_text.strip()
+                    match = date_pattern.search(candidate)
+                    if match:
+                        # Extract the whole matched string, e.g., "September 14, 2024" or "Apr 14, 2024"
+                        date_str = match.group(0)
+                        try:
+                            return datetime.strptime(date_str, "%b %d, %Y").date()
+                        except ValueError:
+                            try:
+                                return datetime.strptime(date_str, "%B %d, %Y").date()
+                            except ValueError:
+                                # If parsing fails, continue to next candidate.
+                                continue
+
+        raise RuntimeError("No date found in h3 nested br or b tags.")
+
+    def parse_load_info_id_onclick(self, onclick_str: str):
         """
         Extracts the numeric ID and label from an onclick string like:
           loadInfoID(149913,'Road Race 04/30/2024')
+          
 
         Returns (race_id, label) as strings
         """
@@ -116,6 +140,27 @@ class WebScraper(ScraperInterface):
             label = match.group(2)
             return race_id, label
         raise ValueError(f"Could not extract info_id and label from {onclick_str}")
+    
+    def parse_load_info_id_script(self, script_text: str):
+        """
+        Extracts the numeric ID and label from a script text like:
+          \n\tloadInfoID(149455,null,0);\n
+        """
+        def js_value_to_python(val: str):
+            val = val.strip()
+            if val == "null":
+                return None
+            # Remove surrounding quotes if present.
+            if (val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"')):
+                return val[1:-1]
+            return val
+
+        match = re.search(r"\s*loadInfoID\(\s*(\d+)\s*,\s*([^,]+?)\s*,\s*0\s*\);\s*", script_text)
+        if match:
+            info_id = match.group(1)
+            label = js_value_to_python(match.group(2))
+            return info_id, label 
+        raise ValueError(f"Could not extract info_id and label from {script_text}")
 
     def scrape_athlete_result_page(self, athlete_name) -> List[AthleteResult]:
         url = f'https://legacy.usacycling.org/results/index.php?compid={quote_plus(athlete_name)}'
@@ -268,6 +313,10 @@ class WebScraper(ScraperInterface):
             race.heats.append(self.scrape_heat(race_id, heat_name))
 
         return race
+    
+    def process_inline_event(self, event_label):
+        raise NotImplementedError("process_inline_event() not implemented")
+
 
     def scrape_event_series_page(self, url: HttpUrl, athlete_results: List[AthleteResult]):
         response = self.session.get(str(url))
@@ -280,34 +329,39 @@ class WebScraper(ScraperInterface):
         )
 
         races_in_series = soup.select(".tablerow")
-        athlete_results_by_date = sorted(athlete_results, key=lambda x: x.event_date)
+        if not races_in_series: #check for inline
+            script_tag = soup.find("script", text=re.compile("loadInfoID"))
+            id, label = self.parse_load_info_id_script(script_tag.get_text())
+            race_event = self.scrape_race_event(id, label)
+            race_series.events.append(race_event)
+        else:    
+            athlete_results_by_date = sorted(athlete_results, key=lambda x: x.event_date)
 
-        for race_html in races_in_series:
-            if race_html.select_one("div.tablecell.header"):
-                continue
-
-            cells = race_html.find_all("div", class_="tablecell")
-            if len(cells) < 2:
-                continue
-            date_text = cells[1].get_text(strip=True)  # e.g. "04/30/2024"
-            row_date = datetime.strptime(date_text, "%m/%d/%Y").date()
-
-            # Find matching AthleteResult objects with the same date
-            matching_results = [ar for ar in athlete_results_by_date if ar.event_date == row_date]
-
-            if matching_results:
-                if len(matching_results) > 1:
-                    raise ValueError(f"Multiple AthleteResult objects found for {row_date}")
-
-                race_result = matching_results[0]
-                link = cells[0].find("a")
-                if not link:
+            for race_html in races_in_series:
+                if race_html.select_one("div.tablecell.header"):
                     continue
-                onclick_val = link.get("onclick", "")
-                info_id, label = self.parse_load_info_id(onclick_val)
-                race_series.events.append(self.scrape_race_event(info_id, label))
-            else:
-                # No matching AthleteResult found for row_date; this is acceptable.
-                pass
+
+                cells = race_html.find_all("div", class_="tablecell")
+                if len(cells) < 2:
+                    continue
+                date_text = cells[1].get_text(strip=True)  # e.g. "04/30/2024"
+                row_date = datetime.strptime(date_text, "%m/%d/%Y").date()
+
+                # Find matching AthleteResult objects with the same date
+                matching_results = [ar for ar in athlete_results_by_date if ar.event_date == row_date]
+
+                if matching_results:
+                    if len(matching_results) > 1:
+                        raise ValueError(f"Multiple AthleteResult objects found for {row_date}")
+
+                    link = cells[0].find("a")
+                    if not link:
+                        continue
+                    onclick_val = link.get("onclick", "")
+                    info_id, label = self.parse_load_info_id_onclick(onclick_val)
+                    race_series.events.append(self.scrape_race_event(info_id, label))
+                else:
+                    # No matching AthleteResult found for row_date; this is acceptable.
+                    pass
 
         return race_series

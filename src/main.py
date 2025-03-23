@@ -188,12 +188,20 @@ def main(athlete_name, category, lookback, discipline, dump, use_cached):
     for athlete_result_url, group in groups.items():
         race_series_results = scraper.scrape_event_series_page(athlete_result_url, group)
         dump_to_json(CACHE_EVENT_SERIES_BASENAME_PREFIX, race_series_results, to_file_id(athlete_result_url))
+        # Group athlete results by event_date in this URL's group
+        athlete_results_by_date = defaultdict(list)
+        for ar in group:
+            athlete_results_by_date[ar.event_date].append(ar)
+
         for event in race_series_results.events:
+            # Only process athlete results matching the event date
+            matching_results = athlete_results_by_date.get(event.event_date)
+            if not matching_results:
+                continue
             for heat in event.heats:
-                for athlete_result in group:
+                for athlete_result in matching_results:
                     matches = [p for p in heat.participants if p.name == athlete_result.name]
                     if not matches:
-                        # Athlete did not participate in this heat: skip to the next heat
                         continue
                     if len(matches) > 1:
                         raise ValueError(
@@ -208,15 +216,14 @@ def main(athlete_name, category, lookback, discipline, dump, use_cached):
                         p_place, p_cat = parse_heat_category(p.category)
                         p.parsed_place = p_place
                         p.parsed_cat = p_cat
-
-                        if (p_cat == parsed_cat):
+                        if p_cat == parsed_cat:
                             participants_in_cat += 1
                     sorted_participants = sorted(
                         [p for p in heat.participants if p.parsed_cat == parsed_cat],
                         key=lambda p: float('inf') if (p.parsed_place is None or p.parsed_place == 0) else p.parsed_place
                     )
                     place_in_cat = sorted_participants.index(heat_result) + 1
-                    
+
                     detailed_result = AthleteResultDetailed.from_components(
                         result=athlete_result,
                         heat_result=heat_result,
