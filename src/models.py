@@ -129,7 +129,7 @@ class AthleteResultDetailed(AthleteResult):
             raise ValueError("Mismatch between AthleteResult.name and AthleteResultHeat.name")
         
         # Start with AthleteResult's fields
-        data = result.dict()
+        data = result.model_dump()
         # Add AthleteResultHeat fields
         data.update({
             "category": heat_result.category,
